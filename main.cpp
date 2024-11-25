@@ -1,13 +1,19 @@
 #include <iostream>
 #include <algorithm>
+#include <functional>
 #include <random>
 #include <vector>
 #include <set>
+#include <omp.h>
 
 #define MIN_WEIGHT 1
 #define MAX_WEIGHT 10
-#define EDGES_NUM 12
-#define VERTICES_NUM 8
+#define VERTICES_NUM 1e2
+#define EDGES_NUM VERTICES_NUM * (VERTICES_NUM - 1) / 2
+
+#define SEED 920215
+#define SEED_INC 123456
+#define RUNS_NUM 1
 
 using std::vector, std::set, std::pair, std::swap, std::min, std::max, std::cout, std::cin, std::endl;
 
@@ -62,13 +68,15 @@ void union_sets(int a, int b, vector<int> &parent, vector<int> &rank){
 }
 
 // V - количество вершин, E - количество ребер
-vector<Edge> generate_random_connected_graph(const int &V, const int &E){
+vector<Edge> generate_random_connected_graph(const int &V, const int &E, const int &seed){
     if (E < V - 1){
-        throw std::invalid_argument("Невозможно создать связный граф: слишком мало рёбер!");
+        throw std::invalid_argument("It is impossible to create a connected graph: there are too few edges!");
+    }
+    if (E > V * (V - 1) / 2){
+        throw std::invalid_argument("It is impossible to create a graph: there are too many edges!");
     }
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
+    std::mt19937 gen(seed);
     std::uniform_int_distribution<> vertex_dist(0, V - 1);
     std::uniform_int_distribution<> weight_dist(MIN_WEIGHT, MAX_WEIGHT);
     vector<Edge> edges;
@@ -128,20 +136,55 @@ vector<Edge> findMST_Kruskal(vector<Edge> &edges){
             union_sets(e.u, e.v, parent, rank);
         }
     }
+
+    if (result.size() != VERTICES_NUM - 1){
+        throw std::runtime_error("Incorrect size of the MST!");
+    }
+
     return result;
 }
 
-int main(){
-    vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM);
-    vector<Edge> result = findMST_Kruskal(edges);
+// Чтобы можно было запихнуть в time_algorithm
+// Не перегрузка, чтобы передать без static_cast
+vector<Edge> findMST_Kruskal_t(vector<Edge> &edges, const int &_){
+    return findMST_Kruskal(edges);
+}
 
-    int resulting_weight = 0;
-    cout << "MST:" << endl;
+vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num){}
 
-    for (const Edge &e: result){
-        cout << e << endl;
-        resulting_weight += e.weight;
+void time_algorithm(const int &min_threads_num, const int &max_threads_num,
+                    std::function<vector<Edge>(vector<Edge> &, const int &)> func){
+    for (int t = min_threads_num; t <= max_threads_num; t++){
+        double time_spent = 0;
+        int seed = SEED;
+
+        for (int i = 0; i < RUNS_NUM; i++){
+            vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM, seed);
+            seed += SEED_INC;
+
+            const double start = omp_get_wtime();
+            vector<Edge> result = func(edges, t);
+            const double end = omp_get_wtime();
+
+            time_spent += end - start;
+        }
+        cout << time_spent / RUNS_NUM << endl;
     }
+}
 
-    cout << "Resulting weight: " << resulting_weight << endl;
+int main(){
+    const int threads_num = omp_get_num_procs(); // for future parallel algo
+    // vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM, SEED);
+    // vector<Edge> result = findMST_Kruskal(edges);
+    //
+    // int resulting_weight = 0;
+    // cout << "MST:" << endl;
+    //
+    // for (const Edge &e: result){
+    //     cout << e << endl;
+    //     resulting_weight += e.weight;
+    // }
+    //
+    // cout << "Resulting weight: " << resulting_weight << endl;
+    time_algorithm(1, 1, findMST_Kruskal_t);
 }
