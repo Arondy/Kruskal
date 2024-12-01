@@ -7,13 +7,13 @@
 #include <omp.h>
 
 #define MIN_WEIGHT 1
-#define MAX_WEIGHT 1e3
+#define MAX_WEIGHT (VERTICES_NUM * 10)
 #define VERTICES_NUM 1e3
-#define EDGES_NUM VERTICES_NUM * (VERTICES_NUM - 1) / 2
+#define EDGES_NUM (VERTICES_NUM * (VERTICES_NUM - 1) / 2)
 
 #define SEED 920215
 #define SEED_INC 123456
-#define RUNS_NUM 1
+#define RUNS_NUM 10
 
 using std::vector, std::set, std::pair, std::swap, std::min, std::max, std::cout, std::cin, std::endl;
 
@@ -86,6 +86,10 @@ vector<Edge> generate_random_connected_graph(const int &V, const int &E, const i
     vector<int> vertices(V);
 
     if constexpr (EDGES_NUM < VERTICES_NUM * (VERTICES_NUM - 1) / 2 - (VERTICES_NUM - 1)){
+        if constexpr (VERTICES_NUM >= 5e3){
+            // cout << "You shouldn't have come here... It was better to generate a complete graph..." << endl;
+        }
+
         for (int i = 0; i < V; ++i){
             vertices[i] = i;
         }
@@ -121,15 +125,17 @@ vector<Edge> generate_random_connected_graph(const int &V, const int &E, const i
         }
     }
 
-    // Удаление остовных ребер
-    omp_lock_t lock;
-    omp_init_lock(&lock);
+    if constexpr (EDGES_NUM < VERTICES_NUM * (VERTICES_NUM - 1) / 2 - (VERTICES_NUM - 1)){
+        // Удаление остовных ребер
+        omp_lock_t lock;
+        omp_init_lock(&lock);
 #pragma omp parallel for num_threads(omp_get_num_procs())
-    for (const Edge &edge: edges){
-        if (auto it = std::find(all_edges.begin(), all_edges.end(), edge); it != all_edges.end()){
-            omp_set_lock(&lock);
-            all_edges.erase(it);
-            omp_unset_lock(&lock);
+        for (const Edge &edge: edges){
+            if (auto it = std::find(all_edges.begin(), all_edges.end(), edge); it != all_edges.end()){
+                omp_set_lock(&lock);
+                all_edges.erase(it);
+                omp_unset_lock(&lock);
+            }
         }
     }
 
@@ -140,50 +146,91 @@ vector<Edge> generate_random_connected_graph(const int &V, const int &E, const i
     int needed_edges = E - edges.size();
     edges.insert(edges.end(), all_edges.begin(), all_edges.begin() + needed_edges);
     const double end = omp_get_wtime();
-    cout << "Generation took " << end - start << " seconds for " << edges.size() << " edges" << endl;
+    // cout << "Generation took " << end - start << " seconds for " << edges.size() << " edges" << endl;
 
     return edges;
 }
 
-vector<Edge> findMST_Kruskal(vector<Edge> &edges){
+vector<Edge> findMST_Kruskal(vector<Edge> &sorted_edges){
     vector<int> parent(EDGES_NUM);
     vector<int> rank(EDGES_NUM);
     vector<Edge> result;
-
-    cout << "Consecutive Kruskal:" << endl;
 
     // Создаем подмножество из каждой вершины
     for (int i = 0; i < EDGES_NUM; i++){
         make_set(i, parent, rank);
     }
 
-    // TODO: заменить на IQS
-    sort(edges.begin(), edges.end());
-
-    for (Edge e: edges){
+    for (Edge e: sorted_edges){
         if (find_set_representative(e.u, parent, rank) != find_set_representative(e.v, parent, rank)){
             result.push_back(e);
             union_sets(e.u, e.v, parent, rank);
         }
     }
 
-    if (result.size() != VERTICES_NUM - 1){
-        throw std::runtime_error("Incorrect size of the MST!");
-    }
+    // if (result.size() != VERTICES_NUM - 1){
+    //     throw std::runtime_error("Incorrect size of the MST!");
+    // }
 
     return result;
 }
 
 // Чтобы можно было запихнуть в time_algorithm
 // Не перегрузка, чтобы передать без static_cast
-vector<Edge> findMST_Kruskal_t(vector<Edge> &edges, const int &_){
-    return findMST_Kruskal(edges);
+vector<Edge> findMST_Kruskal_t(vector<Edge> &sorted_edges, const int &_){
+    return findMST_Kruskal(sorted_edges);
 }
 
 vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num){
     vector<Edge> result;
 
-    cout << "Parallel Kruskal:" << endl;
+    int edges_per_thread = edges.size() / threads_num;
+    vector<vector<Edge>> local_edge_sets(threads_num);
+
+    //for( int i = 0; i < EDGES_NUM; i++){
+    //    make_set(i, parent, rank);
+    //}
+
+    std::sort(edges.begin(), edges.end());
+
+#pragma omp parallel num_threads(threads_num)
+    {
+        int thread_id = omp_get_thread_num();
+        int start_id = thread_id * edges_per_thread;
+        int end_id = (thread_id == threads_num - 1) ? edges.size() : start_id + edges_per_thread;
+
+        vector<Edge> local_edges(edges.begin() + start_id, edges.begin() + end_id);
+        vector<Edge> local_msf = findMST_Kruskal(local_edges);
+        local_edge_sets[thread_id] = std::move(local_msf);
+    }
+
+    while (local_edge_sets.size() > 1){
+#pragma omp parallel for num_threads(threads_num / 2)
+        for (int i = 0; i < local_edge_sets.size() / 2; ++i){
+            // Объединяем два подмножества MSF
+            vector<Edge> merged_edges = local_edge_sets[2 * i];
+            merged_edges.insert(merged_edges.end(), local_edge_sets[2 * i + 1].begin(),
+                                local_edge_sets[2 * i + 1].end());
+
+            //std::cout << "check " << local_edge_sets[2 * i + 1].end() - local_edge_sets[2 * i + 1].begin() << std::endl;
+
+            vector<Edge> merged_msf = findMST_Kruskal(merged_edges);
+            local_edge_sets[i] = std::move(merged_msf);
+        }
+
+        local_edge_sets.resize((local_edge_sets.size() + 1) / 2);
+    }
+
+    result = local_edge_sets[0];
+
+    /*
+    std::cout << "check" << result.size() << std::endl;
+    for (int i = 0; i < 19; i++){
+        std::cout <<"u " << result[i].u <<" v " << result[i].v << " weight " << result[i].weight << std::endl;
+    }
+
+    sort(result.begin(), result.end());
+    */
 
     return result;
 }
@@ -199,6 +246,7 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
             seed += SEED_INC;
 
             const double start = omp_get_wtime();
+            sort(edges.begin(), edges.end());
             vector<Edge> result = func(edges, t);
             const double end = omp_get_wtime();
 
@@ -209,5 +257,9 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
 }
 
 int main(){
+    cout << "Consecutive Kruskal:" << endl;
     time_algorithm(1, 1, findMST_Kruskal_t);
+
+    cout << "Parallel Kruskal:" << endl;
+    time_algorithm(6, 6, findMST_ParallelKruskal);
 }
