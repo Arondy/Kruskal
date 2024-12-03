@@ -8,12 +8,12 @@
 
 #define MIN_WEIGHT 1
 #define MAX_WEIGHT (VERTICES_NUM * 10)
-#define VERTICES_NUM 1e3
-#define EDGES_NUM (VERTICES_NUM * (VERTICES_NUM - 1) / 2)
+#define VERTICES_NUM 5e3
+#define EDGES_NUM (VERTICES_NUM * (VERTICES_NUM - 1) / 2) / 2
 
 #define SEED 920215
 #define SEED_INC 123456
-#define RUNS_NUM 10
+#define RUNS_NUM 1
 
 using std::vector, std::set, std::pair, std::swap, std::min, std::max, std::cout, std::cin, std::endl;
 
@@ -181,18 +181,47 @@ vector<Edge> findMST_Kruskal_t(vector<Edge> &sorted_edges, const int &_){
     return findMST_Kruskal(sorted_edges);
 }
 
+// Функция для слияния двух отсортированных массивов
+vector<Edge> merge(const vector<Edge> &a, const vector<Edge> &b){
+    vector<Edge> merged;
+    size_t i = 0, j = 0;
+
+    while (i < a.size() && j < b.size()){
+        if (a[i] < b[j]){
+            merged.push_back(a[i++]);
+        } else{
+            merged.push_back(b[j++]);
+        }
+    }
+
+    while (i < a.size()){
+        merged.push_back(a[i++]);
+    }
+
+    while (j < b.size()){
+        merged.push_back(b[j++]);
+    }
+
+    return merged;
+}
+
+vector<Edge> merge_sort(const vector<vector<Edge>> &local_edge_sets, int left, int right){
+    if (left == right){
+        return local_edge_sets[left];
+    }
+
+    int mid = left + (right - left) / 2;
+    vector<Edge> left_sorted = merge_sort(local_edge_sets, left, mid);
+    vector<Edge> right_sorted = merge_sort(local_edge_sets, mid + 1, right);
+
+    return merge(left_sorted, right_sorted);
+}
+
 vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num){
     vector<Edge> result;
 
     int edges_per_thread = edges.size() / threads_num;
     vector<vector<Edge>> local_edge_sets(threads_num);
-
-    //for( int i = 0; i < EDGES_NUM; i++){
-    //    make_set(i, parent, rank);
-    //}
-
-    std::sort(edges.begin(), edges.end());
-
 #pragma omp parallel num_threads(threads_num)
     {
         int thread_id = omp_get_thread_num();
@@ -200,37 +229,13 @@ vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num
         int end_id = (thread_id == threads_num - 1) ? edges.size() : start_id + edges_per_thread;
 
         vector<Edge> local_edges(edges.begin() + start_id, edges.begin() + end_id);
-        vector<Edge> local_msf = findMST_Kruskal(local_edges);
-        local_edge_sets[thread_id] = std::move(local_msf);
+        local_edge_sets[thread_id] = findMST_Kruskal(local_edges);
     }
+    // Слияние всех локальных MST в один массив с использованием merge_sort
+    vector<Edge> merged_edges = merge_sort(local_edge_sets, 0, threads_num - 1);
 
-    while (local_edge_sets.size() > 1){
-#pragma omp parallel for num_threads(threads_num / 2)
-        for (int i = 0; i < local_edge_sets.size() / 2; ++i){
-            // Объединяем два подмножества MSF
-            vector<Edge> merged_edges = local_edge_sets[2 * i];
-            merged_edges.insert(merged_edges.end(), local_edge_sets[2 * i + 1].begin(),
-                                local_edge_sets[2 * i + 1].end());
-
-            //std::cout << "check " << local_edge_sets[2 * i + 1].end() - local_edge_sets[2 * i + 1].begin() << std::endl;
-
-            vector<Edge> merged_msf = findMST_Kruskal(merged_edges);
-            local_edge_sets[i] = std::move(merged_msf);
-        }
-
-        local_edge_sets.resize((local_edge_sets.size() + 1) / 2);
-    }
-
-    result = local_edge_sets[0];
-
-    /*
-    std::cout << "check" << result.size() << std::endl;
-    for (int i = 0; i < 19; i++){
-        std::cout <<"u " << result[i].u <<" v " << result[i].v << " weight " << result[i].weight << std::endl;
-    }
-
-    sort(result.begin(), result.end());
-    */
+    // Находим MST для всего множества рёбер с использованием Kruskal
+    result = findMST_Kruskal(merged_edges);
 
     return result;
 }
@@ -244,10 +249,11 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
         for (int i = 0; i < RUNS_NUM; i++){
             vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM, seed);
             seed += SEED_INC;
+            sort(edges.begin(), edges.end());
 
             const double start = omp_get_wtime();
-            sort(edges.begin(), edges.end());
-            vector<Edge> result = func(edges, t);
+
+            func(edges, t);
             const double end = omp_get_wtime();
 
             time_spent += end - start;
@@ -261,5 +267,5 @@ int main(){
     time_algorithm(1, 1, findMST_Kruskal_t);
 
     cout << "Parallel Kruskal:" << endl;
-    time_algorithm(6, 6, findMST_ParallelKruskal);
+    time_algorithm(1, 12, findMST_ParallelKruskal);
 }
