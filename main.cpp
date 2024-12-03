@@ -229,6 +229,7 @@ vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num
         int end_id = (thread_id == threads_num - 1) ? edges.size() : start_id + edges_per_thread;
 
         vector<Edge> local_edges(edges.begin() + start_id, edges.begin() + end_id);
+        sort(local_edges.begin(), local_edges.end());
         local_edge_sets[thread_id] = findMST_Kruskal(local_edges);
     }
     // Слияние всех локальных MST в один массив с использованием merge_sort
@@ -249,7 +250,7 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
         for (int i = 0; i < RUNS_NUM; i++){
             vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM, seed);
             seed += SEED_INC;
-            sort(edges.begin(), edges.end());
+            // sort(edges.begin(), edges.end());
 
             const double start = omp_get_wtime();
 
@@ -263,8 +264,8 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
 }
 
 int main(){
-    cout << "Consecutive Kruskal:" << endl;
-    time_algorithm(1, 1, findMST_Kruskal_t);
+    // cout << "Consecutive Kruskal:" << endl;
+    // time_algorithm(1, 1, findMST_Kruskal_t);
 
     cout << "Parallel Kruskal:" << endl;
     time_algorithm(1, 12, findMST_ParallelKruskal);
