@@ -8,12 +8,12 @@
 
 #define MIN_WEIGHT 1
 #define MAX_WEIGHT (VERTICES_NUM * 10)
-#define VERTICES_NUM 5e3
-#define EDGES_NUM (VERTICES_NUM * (VERTICES_NUM - 1) / 2) / 2
+#define VERTICES_NUM 1e3
+#define EDGES_NUM (VERTICES_NUM * (VERTICES_NUM - 1) / 2)
 
 #define SEED 920215
 #define SEED_INC 123456
-#define RUNS_NUM 1
+#define RUNS_NUM 10
 
 using std::vector, std::set, std::pair, std::swap, std::min, std::max, std::cout, std::cin, std::endl;
 
@@ -151,34 +151,32 @@ vector<Edge> generate_random_connected_graph(const int &V, const int &E, const i
     return edges;
 }
 
-vector<Edge> findMST_Kruskal(vector<Edge> &sorted_edges){
+vector<Edge> findMST_Kruskal(vector<Edge> &edges){
     vector<int> parent(EDGES_NUM);
     vector<int> rank(EDGES_NUM);
     vector<Edge> result;
+
+    sort(edges.begin(), edges.end());
 
     // Создаем подмножество из каждой вершины
     for (int i = 0; i < EDGES_NUM; i++){
         make_set(i, parent, rank);
     }
 
-    for (Edge e: sorted_edges){
+    for (Edge e: edges){
         if (find_set_representative(e.u, parent, rank) != find_set_representative(e.v, parent, rank)){
             result.push_back(e);
             union_sets(e.u, e.v, parent, rank);
         }
     }
 
-    // if (result.size() != VERTICES_NUM - 1){
-    //     throw std::runtime_error("Incorrect size of the MST!");
-    // }
-
     return result;
 }
 
 // Чтобы можно было запихнуть в time_algorithm
 // Не перегрузка, чтобы передать без static_cast
-vector<Edge> findMST_Kruskal_t(vector<Edge> &sorted_edges, const int &_){
-    return findMST_Kruskal(sorted_edges);
+vector<Edge> findMST_Kruskal_t(vector<Edge> &edges, const int &_){
+    return findMST_Kruskal(edges);
 }
 
 // Функция для слияния двух отсортированных массивов
@@ -229,7 +227,7 @@ vector<Edge> findMST_ParallelKruskal(vector<Edge> &edges, const int &threads_num
         int end_id = (thread_id == threads_num - 1) ? edges.size() : start_id + edges_per_thread;
 
         vector<Edge> local_edges(edges.begin() + start_id, edges.begin() + end_id);
-        sort(local_edges.begin(), local_edges.end());
+        // sort(local_edges.begin(), local_edges.end());
         local_edge_sets[thread_id] = findMST_Kruskal(local_edges);
     }
     // Слияние всех локальных MST в один массив с использованием merge_sort
@@ -250,10 +248,8 @@ void time_algorithm(const int &min_threads_num, const int &max_threads_num,
         for (int i = 0; i < RUNS_NUM; i++){
             vector<Edge> edges = generate_random_connected_graph(VERTICES_NUM, EDGES_NUM, seed);
             seed += SEED_INC;
-            // sort(edges.begin(), edges.end());
 
             const double start = omp_get_wtime();
-
             func(edges, t);
             const double end = omp_get_wtime();
 
@@ -268,5 +264,5 @@ int main(){
     // time_algorithm(1, 1, findMST_Kruskal_t);
 
     cout << "Parallel Kruskal:" << endl;
-    time_algorithm(1, 12, findMST_ParallelKruskal);
+    time_algorithm(6, 6, findMST_ParallelKruskal);
 }
